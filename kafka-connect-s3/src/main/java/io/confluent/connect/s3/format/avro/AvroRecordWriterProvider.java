@@ -18,7 +18,7 @@ package io.confluent.connect.s3.format.avro;
 
 import org.apache.avro.Schema.Field;
 import org.apache.avro.generic.GenericData;
-import org.apache.avro.generic.GenericRecord;
+//import org.apache.avro.generic.GenericRecord;
 //import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.avro.file.CodecFactory;
 import org.apache.avro.file.DataFileWriter;
@@ -30,7 +30,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.Iterator;
+//import java.util.Iterator;
+//import java.util.List;
 
 import io.confluent.connect.avro.AvroData;
 import io.confluent.connect.s3.S3SinkConnectorConfig;
@@ -38,7 +39,7 @@ import io.confluent.connect.s3.storage.S3OutputStream;
 import io.confluent.connect.s3.storage.S3Storage;
 import io.confluent.connect.storage.format.RecordWriter;
 import io.confluent.connect.storage.format.RecordWriterProvider;
-//import io.confluent.kafka.serializers.NonRecordContainer;
+import io.confluent.kafka.serializers.NonRecordContainer;
 import org.kitesdk.data.spi.SchemaUtil;
 
 public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConnectorConfig> {
@@ -85,16 +86,17 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
       @Override
       public void write(SinkRecord record) {
         if (schema == null) {
-          schema = record.valueSchema();
-          keySchema = record.keySchema();//add this back once we have the key schema defined
+          schema = record.valueSchema();//get the connect value schema
+          keySchema = record.keySchema();//get the connect key schema
 
           try {
             log.info("Opening record writer for: {}", filename);
             s3out = storage.create(filename, true);
-            avroSchema = avroData.fromConnectSchema(schema);
-            avroKeySchema = avroData.fromConnectSchema(keySchema);
+            avroSchema = avroData.fromConnectSchema(schema);//convert to avro value schema
+            avroKeySchema = avroData.fromConnectSchema(keySchema);//convert to key value schema
 
-            // Merge of schema 1 and 2
+            // Merge of avro schema 1 and 2
+            // This connector will always save both the key and value together
             outputSchema = SchemaUtil.merge(avroSchema, avroKeySchema);
 
             writer.setCodec(CodecFactory.fromString(conf.getAvroCodec()));
@@ -104,34 +106,21 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
           }
         }
         log.trace("Sink record: {}", record);
+        // Object is either NonRecordContainer or Record (implements GenericRecord)
         Object value = avroData.fromConnectData(schema, record.value());
         Object key = avroData.fromConnectData(keySchema, record.key());
 
-        // Cast to generic record??
-        GenericRecord tempValue = (GenericRecord) value;
-        GenericRecord tempKey = (GenericRecord) key;
-        GenericRecord outputValue = new GenericData.Record(outputSchema);
-
-        // Append the fields in value
-        for (Iterator<Field> i = avroSchema.getFields().iterator(); i.hasNext();) {
-          Field field = i.next();
-          String fieldName = field.name();
-          outputValue.put(fieldName, tempValue.get(fieldName));
-        }
-
-        // Append the fields in key
-        for (Iterator<Field> i = avroKeySchema.getFields().iterator(); i.hasNext();) {
-          Field field = i.next();
-          String fieldName = field.name();
-          outputValue.put(fieldName, tempKey.get(fieldName));
-        }
+        // Create the outputValue object
+        GenericData.Record outputValue = new GenericData.Record(outputSchema);
+        outputValue = getOutputValue(key, value, avroSchema, avroKeySchema, outputValue);
 
         try {
           // AvroData wraps primitive types so their schema can be included. We need to unwrap
           // NonRecordContainers to just their value to properly handle these types
-          //          if (value instanceof NonRecordContainer) {
-          //            value = ((NonRecordContainer) value).getValue();
-          //          }
+          //if (outputValue instanceof NonRecordContainer) {
+          //  outputValue = ((NonRecordContainer) outputValue).getValue();
+          //}
+
           writer.append(outputValue);
         } catch (IOException e) {
           throw new ConnectException(e);
@@ -160,5 +149,51 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
         }
       }
     };
+  }
+
+  private GenericData.Record getOutputValue(
+          Object key,
+          Object value,
+          org.apache.avro.Schema avroSchema,
+          org.apache.avro.Schema avroKeySchema,
+          GenericData.Record outputValue) {
+    // if value is NonRecordContainer
+    if (value instanceof NonRecordContainer) {
+      // Append the fields to outputValue
+      for (Field field: avroSchema.getFields()) {
+        String fieldName = field.name();
+        outputValue.put(fieldName, ((NonRecordContainer) value).getValue());
+      }
+    } else {
+      // Cast to Record
+      GenericData.Record tempValue = (GenericData.Record) value;
+
+      // Append the fields to outputValue
+      for (Field field: avroSchema.getFields()) {
+        String fieldName = field.name();
+        outputValue.put(fieldName, tempValue.get(fieldName));
+      }
+    }
+
+    // if key is NonRecordContainer
+    if (key instanceof NonRecordContainer) {
+      // Append the fields to outputValue
+      for (Field field: avroKeySchema.getFields()) {
+        String fieldName = field.name();
+        outputValue.put(fieldName, ((NonRecordContainer) key).getValue());
+      }
+      // if key is Record (implements GenericRecord)
+    } else {
+      // Cast to Record
+      GenericData.Record tempKey = (GenericData.Record) key;
+
+      // Append the fields to outputValue
+      for (Field field: avroKeySchema.getFields()) {
+        String fieldName = field.name();
+        outputValue.put(fieldName, tempKey.get(fieldName));
+      }
+    }
+
+    return outputValue;
   }
 }
