@@ -16,15 +16,11 @@
 
 package io.confluent.connect.s3.format.avro;
 
-//import org.apache.avro.Schema.Field;
-import org.apache.kafka.connect.data.Field;
+import org.apache.kafka.connect.data.*;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.file.CodecFactory;
 import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericDatumWriter;
-import org.apache.kafka.connect.data.ConnectSchema;
-import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.slf4j.Logger;
@@ -63,50 +59,37 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
     // This is not meant to be a thread-safe writer!
     return new RecordWriter() {
       final DataFileWriter<Object> writer = new DataFileWriter<>(new GenericDatumWriter<>());
-      Schema valueSchema = null;//connect value schema
-      Schema keySchema = null;//connect key schema
-      org.apache.avro.Schema avroValueSchema = null;//avro value schema (converted from connect value schema)
-      org.apache.avro.Schema avroKeySchema = null;//avro key schema (converted from connect key schema)
+      // Connect schemas
+      Schema keySchema = null;
+      Schema valueSchema = null;
+
+      // Avro schemas
+      org.apache.avro.Schema avroKeySchema = null;
+      org.apache.avro.Schema avroValueSchema = null;
       org.apache.avro.Schema outputSchema = null;
+
+      // Set isCombineKeyValue based on config
       Boolean isCombineKeyValue = conf.getSinkData().contains("key") && conf.getSinkData().contains("value");
+
+      // S3 output stream
       S3OutputStream s3out;
 
       @Override
       public void write(SinkRecord record) {
         if (valueSchema == null) {
-          valueSchema = record.valueSchema();//get the connect value schema
           keySchema = record.keySchema();//get the connect key schema
+          valueSchema = record.valueSchema();//get the connect value schema
 
           try {
             log.info("Opening record writer for: {}", filename);
             s3out = storage.create(filename, true);
-            avroKeySchema = avroData.fromConnectSchema(keySchema);//convert to key value schema
+            avroKeySchema = avroData.fromConnectSchema(keySchema);//convert to avro key schema
             avroValueSchema = avroData.fromConnectSchema(valueSchema);//convert to avro value schema
 
-            // Combine avro key schema and avro value schema
             //TODO: deal with the issue that left is String
+            // Combine avro key schema and avro value schema
             if (isCombineKeyValue) {
-//              outputSchema = org.apache.avro.Schema.createRecord("ConnectDefault", null, "io.confluent.connect.avro", false);
-//              List<org.apache.avro.Schema.Field> keyFields = avroKeySchema.getFields();
-//              List<org.apache.avro.Schema.Field> valueFields = avroValueSchema.getFields();
-//              List<org.apache.avro.Schema.Field> outputFields = getOutputFields(keyFields, valueFields);
-//              outputSchema.setFields(outputFields);
-              SchemaBuilder builder = SchemaBuilder
-                      .struct()
-                      .name(valueSchema.name())
-                      .doc(valueSchema.doc())
-                      .version(valueSchema.version())
-                      .parameters(valueSchema.parameters());
-
-              for(Field field: keySchema.fields()) {
-                builder.field(field.name(), field.schema());
-              }
-
-              for(Field field: valueSchema.fields()) {
-                builder.field(field.name(), field.schema());
-              }
-
-              outputSchema = avroData.fromConnectSchema(builder.build());
+              outputSchema = getOutputSchema(keySchema, valueSchema);
             } else {
               outputSchema = avroValueSchema;
             }
@@ -120,12 +103,12 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
 
         log.trace("Sink record: {}", record);
         // Object is either NonRecordContainer or GenericData.Record
-        Object value = avroData.fromConnectData(valueSchema, record.value());
         Object key = avroData.fromConnectData(keySchema, record.key());
+        Object value = avroData.fromConnectData(valueSchema, record.value());
         Object outputValue;
 
         if (isCombineKeyValue) {
-          outputValue = getOutputValue(key, value, avroValueSchema, avroKeySchema, outputSchema);
+          outputValue = getOutputValue(key, value, avroKeySchema, avroValueSchema, outputSchema);
         } else {
           outputValue = value;
         }
@@ -166,32 +149,47 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
     };
   }
 
-  private List<org.apache.avro.Schema.Field> getOutputFields(
-      List<org.apache.avro.Schema.Field> keyFields,
-      List<org.apache.avro.Schema.Field> valueFields
-  ) {
-    List<org.apache.avro.Schema.Field> outputFields = new ArrayList<>();
-    for(org.apache.avro.Schema.Field field: keyFields) {
-      org.apache.avro.Schema.Field f = new org.apache.avro.Schema.Field(field.name(), field.schema(), field.doc(), field.defaultValue());
-      outputFields.add(f);
+  /**
+   * Get output schema in avro format
+   * @param keySchema
+   * @param valueSchema
+   * @return output schema in avro format
+   */
+  private org.apache.avro.Schema getOutputSchema(Schema keySchema, Schema valueSchema) {
+    SchemaBuilder builder = SchemaBuilder
+      .struct()
+      .name(valueSchema.name())
+      .doc(valueSchema.doc())
+      .version(valueSchema.version());
+
+    for(Field field: keySchema.fields()) {
+      builder.field(field.name(), field.schema());
     }
 
-    for(org.apache.avro.Schema.Field field: valueFields) {
-      org.apache.avro.Schema.Field f = new org.apache.avro.Schema.Field(field.name(), field.schema(), field.doc(), field.defaultValue());
-      outputFields.add(f);
+    for(Field field: valueSchema.fields()) {
+      builder.field(field.name(), field.schema());
     }
 
-    return outputFields;
+    return avroData.fromConnectSchema(builder.build());
   }
 
+  /**
+   * Get output value for the S3 connector
+   * @param key
+   * @param value
+   * @param avroKeySchema
+   * @param avroValueSchema
+   * @param outputAvroSchema
+   * @return output value
+   */
   private GenericData.Record getOutputValue(
           Object key,
           Object value,
-          org.apache.avro.Schema avroSchema,
           org.apache.avro.Schema avroKeySchema,
-          org.apache.avro.Schema outputSchema) {
+          org.apache.avro.Schema avroValueSchema,
+          org.apache.avro.Schema outputAvroSchema) {
     // Initialize outputValue
-    GenericData.Record outputValue = new GenericData.Record(outputSchema);
+    GenericData.Record outputValue = new GenericData.Record(outputAvroSchema);
 
     // Process the key
     if (key instanceof NonRecordContainer) {
@@ -212,12 +210,12 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
 
     // Process the value
     if (value instanceof NonRecordContainer) {
-      for (org.apache.avro.Schema.Field field: avroSchema.getFields()) {
+      for (org.apache.avro.Schema.Field field: avroValueSchema.getFields()) {
         String fieldName = field.name();
         outputValue.put(fieldName, ((NonRecordContainer) value).getValue());
       }
     } else if (value instanceof GenericData.Record) {
-      for (org.apache.avro.Schema.Field field: avroSchema.getFields()) {
+      for (org.apache.avro.Schema.Field field: avroValueSchema.getFields()) {
         String fieldName = field.name();
         outputValue.put(fieldName, ((GenericData.Record) value).get(fieldName));
       }
