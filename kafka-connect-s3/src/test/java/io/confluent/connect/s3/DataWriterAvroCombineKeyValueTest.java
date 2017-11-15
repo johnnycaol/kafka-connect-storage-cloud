@@ -18,57 +18,37 @@ package io.confluent.connect.s3;
 
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
-import io.confluent.common.utils.MockTime;
-import io.confluent.common.utils.Time;
-import org.apache.avro.file.DataFileStream;
-import org.apache.avro.generic.GenericDatumReader;
-import org.apache.avro.io.DatumReader;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.SchemaProjector;
 import org.apache.kafka.connect.data.Struct;
-import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Test;
 import org.powermock.api.mockito.PowerMockito;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 
 import io.confluent.connect.s3.format.avro.AvroFormat;
-import io.confluent.connect.s3.format.avro.AvroUtils;
 import io.confluent.connect.s3.storage.S3Storage;
 import io.confluent.connect.s3.util.FileUtils;
-import io.confluent.connect.storage.hive.HiveConfig;
-import io.confluent.connect.storage.hive.schema.TimeBasedSchemaGenerator;
 import io.confluent.connect.storage.partitioner.DefaultPartitioner;
 import io.confluent.connect.storage.partitioner.Partitioner;
-import io.confluent.connect.storage.partitioner.PartitionerConfig;
-import io.confluent.connect.storage.partitioner.TimeBasedPartitioner;
 import io.confluent.kafka.serializers.NonRecordContainer;
 
-import static org.apache.kafka.common.utils.Time.SYSTEM;
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
@@ -133,12 +113,12 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
     }
 
     @Test
-    public void testWriteRecordsStringType() throws Exception {
+    public void testWriteRecordsKeyIsString() throws Exception {
         setUp();
         task = new S3SinkTask(connectorConfig, context, storage, partitioner, format, SYSTEM_TIME);
 
-        List<SinkRecord> sinkRecords = createRecordsString(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
-        List<SinkRecord> expectedSinkRecords = createExpectedRecordsString(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
+        List<SinkRecord> sinkRecords = createRecordsKeyIsString(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
+        List<SinkRecord> expectedSinkRecords = createExpectedRecordsKeyIsString(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
         // Perform write
         task.put(sinkRecords);
         task.close(context.assignment());
@@ -149,12 +129,28 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
     }
 
     @Test
-    public void testWriteRecordsNestedType() throws Exception {
+    public void testWriteRecordsKeyIsInt() throws Exception {
         setUp();
         task = new S3SinkTask(connectorConfig, context, storage, partitioner, format, SYSTEM_TIME);
 
-        List<SinkRecord> sinkRecords = createRecordsNested(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
-        List<SinkRecord> expectedSinkRecords = createExpectedRecordsNested(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
+        List<SinkRecord> sinkRecords = createRecordsKeyIsInt(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
+        List<SinkRecord> expectedSinkRecords = createExpectedRecordsKeyIsInt(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
+        // Perform write
+        task.put(sinkRecords);
+        task.close(context.assignment());
+        task.stop();
+
+        long[] validOffsets = {0, 3, 6};
+        verify(expectedSinkRecords, validOffsets);
+    }
+
+    @Test
+    public void testWriteRecordsValueIsNested() throws Exception {
+        setUp();
+        task = new S3SinkTask(connectorConfig, context, storage, partitioner, format, SYSTEM_TIME);
+
+        List<SinkRecord> sinkRecords = createRecordsValueIsNested(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
+        List<SinkRecord> expectedSinkRecords = createExpectedRecordsValueIsNested(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
         // Perform write
         task.put(sinkRecords);
         task.close(context.assignment());
@@ -264,15 +260,15 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
     }
 
     // Key is a primitive string type
-    protected Schema createKeySchemaString() {
+    protected Schema createKeySchemaKeyIsString() {
         return SchemaBuilder.string().build();
     }
 
-    protected String createKeyRecordString() {
+    protected String createKeyRecordKeyIsString() {
         return "This is string primitive";
     }
 
-    protected Schema createExpectedValueSchemaString() {
+    protected Schema createExpectedValueSchemaKeyIsString() {
         return SchemaBuilder
             .struct()
             .field("key", Schema.STRING_SCHEMA)
@@ -285,7 +281,7 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
             .build();
     }
 
-    protected Struct createExpectedValueRecordString(Schema schema) {
+    protected Struct createExpectedValueRecordKeyIsString(Schema schema) {
         return (new Struct(schema)
             .put("key", "This is string primitive")
             .put("boolean", true)
@@ -296,8 +292,41 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
             .put("string", "string"));
     }
 
+    // Key is a primitive int type
+    protected Schema createKeySchemaKeyIsInt() {
+        return SchemaBuilder.int32().build();
+    }
+
+    protected Integer createKeyRecordKeyIsInt() {
+        return Integer.valueOf(12);
+    }
+
+    protected Schema createExpectedValueSchemaKeyIsInt() {
+        return SchemaBuilder
+            .struct()
+            .field("key", Schema.INT32_SCHEMA)
+            .field("boolean", Schema.BOOLEAN_SCHEMA)
+            .field("int", Schema.INT32_SCHEMA)
+            .field("long", Schema.INT64_SCHEMA)
+            .field("float", Schema.FLOAT32_SCHEMA)
+            .field("double", Schema.FLOAT64_SCHEMA)
+            .field("string", Schema.STRING_SCHEMA)
+            .build();
+    }
+
+    protected Struct createExpectedValueRecordKeyIsInt(Schema schema) {
+        return (new Struct(schema)
+            .put("key", Integer.valueOf(12))
+            .put("boolean", true)
+            .put("int", Integer.valueOf(12))
+            .put("long", 12L)
+            .put("float", 12.2F)
+            .put("double", 12.2D)
+            .put("string", "string"));
+    }
+
     // Value is a nested type
-    protected Schema createValueSchemaNested() {
+    protected Schema createValueSchemaValueIsNested() {
         return SchemaBuilder
             .struct()
             .name("layer1")
@@ -327,7 +356,7 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
             .build();
     }
 
-    protected Schema createValueSchemaNestedBase() {
+    protected Schema createValueSchemaValueIsNestedBase() {
         return SchemaBuilder
                 .struct()
                 .name("layer2")
@@ -345,7 +374,7 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
                 ).build();
     }
 
-    protected Schema createValueSchemaNestedsubBase() {
+    protected Schema createValueSchemaValueIsNestedSubBase() {
         return SchemaBuilder
                 .struct()
                 .name("layer3")
@@ -355,7 +384,7 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
                 .build();
     }
 
-    protected Struct createValueRecordNested(Schema schema, Schema baseSchema, Schema subBaseSchema) {
+    protected Struct createValueRecordValueIsNested(Schema schema, Schema baseSchema, Schema subBaseSchema) {
         return (new Struct(schema)
             .put("base",
                 new Struct(baseSchema)
@@ -377,7 +406,7 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
             .put("layer1_string", "string"));
     }
 
-    protected Schema createExpectedValueSchemaNested() {
+    protected Schema createExpectedValueSchemaValueIsNested() {
         return SchemaBuilder
             .struct()
             .name("layer1")
@@ -417,7 +446,7 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
             .build();
     }
 
-    protected Struct createExpectedValueRecordNested(Schema schema, Schema baseSchema, Schema subBaseSchema) {
+    protected Struct createExpectedValueRecordValueIsNested(Schema schema, Schema baseSchema, Schema subBaseSchema) {
         return (new Struct(schema)
             .put("remote_addr", "10.0.0.94")
             .put("http_x_forwarded_for", "205.144.219.182")
@@ -498,9 +527,9 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
      * @param size the number of records to return.
      * @return the list of records.
      */
-    protected List<SinkRecord> createRecordsString(int size, long startOffset, Set<TopicPartition> partitions) {
-        Schema keySchema = createKeySchemaString();
-        String keyRecord = createKeyRecordString();
+    protected List<SinkRecord> createRecordsKeyIsString(int size, long startOffset, Set<TopicPartition> partitions) {
+        Schema keySchema = createKeySchemaKeyIsString();
+        String keyRecord = createKeyRecordKeyIsString();
         Schema valueSchema = createValueSchema();
         Struct valueRecord = createValueRecord(valueSchema);
 
@@ -519,11 +548,11 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
      * @param size the number of records to return.
      * @return the list of records.
      */
-    protected List<SinkRecord> createExpectedRecordsString(int size, long startOffset, Set<TopicPartition> partitions) {
-        Schema keySchema = createKeySchemaString();
-        String keyRecord = createKeyRecordString();
-        Schema valueSchema = createExpectedValueSchemaString();
-        Struct valueRecord = createExpectedValueRecordString(valueSchema);
+    protected List<SinkRecord> createExpectedRecordsKeyIsString(int size, long startOffset, Set<TopicPartition> partitions) {
+        Schema keySchema = createKeySchemaKeyIsString();
+        String keyRecord = createKeyRecordKeyIsString();
+        Schema valueSchema = createExpectedValueSchemaKeyIsString();
+        Struct valueRecord = createExpectedValueRecordKeyIsString(valueSchema);
 
         List<SinkRecord> sinkRecords = new ArrayList<>();
         for (TopicPartition tp : partitions) {
@@ -540,15 +569,11 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
      * @param size the number of records to return.
      * @return the list of records.
      */
-    protected List<SinkRecord> createRecordsNested(int size, long startOffset, Set<TopicPartition> partitions) {
-        Schema keySchema = createKeySchema();
-        Struct keyRecord = createKeyRecord(keySchema);
-
-        Schema valueSchema = createValueSchemaNested();
-        Schema baseSchema = createValueSchemaNestedBase();
-        Schema subBaseSchema = createValueSchemaNestedsubBase();
-
-        Struct valueRecord = createValueRecordNested(valueSchema, baseSchema, subBaseSchema);
+    protected List<SinkRecord> createRecordsKeyIsInt(int size, long startOffset, Set<TopicPartition> partitions) {
+        Schema keySchema = createKeySchemaKeyIsInt();
+        Integer keyRecord = createKeyRecordKeyIsInt();
+        Schema valueSchema = createValueSchema();
+        Struct valueRecord = createValueRecord(valueSchema);
 
         List<SinkRecord> sinkRecords = new ArrayList<>();
         for (TopicPartition tp : partitions) {
@@ -565,15 +590,61 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
      * @param size the number of records to return.
      * @return the list of records.
      */
-    protected List<SinkRecord> createExpectedRecordsNested(int size, long startOffset, Set<TopicPartition> partitions) {
+    protected List<SinkRecord> createExpectedRecordsKeyIsInt(int size, long startOffset, Set<TopicPartition> partitions) {
+        Schema keySchema = createKeySchemaKeyIsInt();
+        Integer keyRecord = createKeyRecordKeyIsInt();
+        Schema valueSchema = createExpectedValueSchemaKeyIsInt();
+        Struct valueRecord = createExpectedValueRecordKeyIsInt(valueSchema);
+
+        List<SinkRecord> sinkRecords = new ArrayList<>();
+        for (TopicPartition tp : partitions) {
+            for (long offset = startOffset; offset < startOffset + size; ++offset) {
+                sinkRecords.add(new SinkRecord(TOPIC, tp.partition(), keySchema, keyRecord, valueSchema, valueRecord, offset));
+            }
+        }
+        return sinkRecords;
+    }
+
+    /**
+     * Return a list of new records starting at zero offset.
+     *
+     * @param size the number of records to return.
+     * @return the list of records.
+     */
+    protected List<SinkRecord> createRecordsValueIsNested(int size, long startOffset, Set<TopicPartition> partitions) {
         Schema keySchema = createKeySchema();
         Struct keyRecord = createKeyRecord(keySchema);
 
-        Schema valueSchema = createExpectedValueSchemaNested();
-        Schema baseSchema = createValueSchemaNestedBase();
-        Schema subBaseSchema = createValueSchemaNestedsubBase();
+        Schema valueSchema = createValueSchemaValueIsNested();
+        Schema baseSchema = createValueSchemaValueIsNestedBase();
+        Schema subBaseSchema = createValueSchemaValueIsNestedSubBase();
 
-        Struct valueRecord = createExpectedValueRecordNested(valueSchema, baseSchema, subBaseSchema);
+        Struct valueRecord = createValueRecordValueIsNested(valueSchema, baseSchema, subBaseSchema);
+
+        List<SinkRecord> sinkRecords = new ArrayList<>();
+        for (TopicPartition tp : partitions) {
+            for (long offset = startOffset; offset < startOffset + size; ++offset) {
+                sinkRecords.add(new SinkRecord(TOPIC, tp.partition(), keySchema, keyRecord, valueSchema, valueRecord, offset));
+            }
+        }
+        return sinkRecords;
+    }
+
+    /**
+     * Return a list of expected records starting at zero offset.
+     *
+     * @param size the number of records to return.
+     * @return the list of records.
+     */
+    protected List<SinkRecord> createExpectedRecordsValueIsNested(int size, long startOffset, Set<TopicPartition> partitions) {
+        Schema keySchema = createKeySchema();
+        Struct keyRecord = createKeyRecord(keySchema);
+
+        Schema valueSchema = createExpectedValueSchemaValueIsNested();
+        Schema baseSchema = createValueSchemaValueIsNestedBase();
+        Schema subBaseSchema = createValueSchemaValueIsNestedSubBase();
+
+        Struct valueRecord = createExpectedValueRecordValueIsNested(valueSchema, baseSchema, subBaseSchema);
 
         List<SinkRecord> sinkRecords = new ArrayList<>();
         for (TopicPartition tp : partitions) {
