@@ -29,7 +29,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -104,9 +103,11 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
 
             // Combine avro key schema and avro value schema
             if (isSinkKey) {
-              outputSchema = getOutputSchema(keySchema, valueSchema);//customized behaviour
+              // Customized behaviour
+              outputSchema = getOutputSchema(keySchema, valueSchema);
             } else {
-              outputSchema = avroValueSchema;//original behaviour
+              // Original behaviour
+              outputSchema = avroValueSchema;
             }
 
             writer.setCodec(CodecFactory.fromString(conf.getAvroCodec()));
@@ -123,8 +124,10 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
         Object outputValue;
 
         if (isSinkKey) {
+          // Customized behaviour
           outputValue = getOutputValue(key, value, avroKeySchema, avroValueSchema, outputSchema);
         } else {
+          // Original behaviour
           outputValue = value;
         }
 
