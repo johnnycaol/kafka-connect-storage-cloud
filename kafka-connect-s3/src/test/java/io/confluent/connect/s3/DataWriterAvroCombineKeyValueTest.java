@@ -121,8 +121,8 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
         setUp();
         task = new S3SinkTask(connectorConfig, context, storage, partitioner, format, SYSTEM_TIME);
 
-        List<SinkRecord> sinkRecords = createRecords(7);
-        List<SinkRecord> expectedSinkRecords = createExpectedRecords(7);
+        List<SinkRecord> sinkRecords = createRecords(7,0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
+        List<SinkRecord> expectedSinkRecords = createExpectedRecords(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
         // Perform write
         task.put(sinkRecords);
         task.close(context.assignment());
@@ -130,9 +130,41 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
 
         long[] validOffsets = {0, 3, 6};
         verify(expectedSinkRecords, validOffsets);
-
     }
 
+    @Test
+    public void testWriteRecordsStringType() throws Exception {
+        setUp();
+        task = new S3SinkTask(connectorConfig, context, storage, partitioner, format, SYSTEM_TIME);
+
+        List<SinkRecord> sinkRecords = createRecordsString(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
+        List<SinkRecord> expectedSinkRecords = createExpectedRecordsString(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
+        // Perform write
+        task.put(sinkRecords);
+        task.close(context.assignment());
+        task.stop();
+
+        long[] validOffsets = {0, 3, 6};
+        verify(expectedSinkRecords, validOffsets);
+    }
+
+    @Test
+    public void testWriteRecordsNestedType() throws Exception {
+        setUp();
+        task = new S3SinkTask(connectorConfig, context, storage, partitioner, format, SYSTEM_TIME);
+
+        List<SinkRecord> sinkRecords = createRecordsNested(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
+        List<SinkRecord> expectedSinkRecords = createExpectedRecordsNested(7, 0, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
+        // Perform write
+        task.put(sinkRecords);
+        task.close(context.assignment());
+        task.stop();
+
+        long[] validOffsets = {0, 3, 6};
+        verify(expectedSinkRecords, validOffsets);
+    }
+
+    // Regular test case
     protected Schema createKeySchema() {
         return SchemaBuilder
             .struct()
@@ -231,33 +263,225 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
             .put("string", "string"));
     }
 
+    // Key is a primitive string type
+    protected Schema createKeySchemaString() {
+        return SchemaBuilder.string().build();
+    }
+
+    protected String createKeyRecordString() {
+        return "This is string primitive";
+    }
+
+    protected Schema createExpectedValueSchemaString() {
+        return SchemaBuilder
+            .struct()
+            .field("key", Schema.STRING_SCHEMA)
+            .field("boolean", Schema.BOOLEAN_SCHEMA)
+            .field("int", Schema.INT32_SCHEMA)
+            .field("long", Schema.INT64_SCHEMA)
+            .field("float", Schema.FLOAT32_SCHEMA)
+            .field("double", Schema.FLOAT64_SCHEMA)
+            .field("string", Schema.STRING_SCHEMA)
+            .build();
+    }
+
+    protected Struct createExpectedValueRecordString(Schema schema) {
+        return (new Struct(schema)
+            .put("key", "This is string primitive")
+            .put("boolean", true)
+            .put("int", Integer.valueOf(12))
+            .put("long", 12L)
+            .put("float", 12.2F)
+            .put("double", 12.2D)
+            .put("string", "string"));
+    }
+
+    // Value is a nested type
+    protected Schema createValueSchemaNested() {
+        return SchemaBuilder
+            .struct()
+            .name("layer1")
+            .field("base",
+                SchemaBuilder
+                .struct()
+                .name("layer2")
+                .field("layer2_string", Schema.STRING_SCHEMA)
+                .field("layer2_int", Schema.INT32_SCHEMA)
+                .field("layer2_long", Schema.INT64_SCHEMA)
+                .field("layer2_base",
+                    SchemaBuilder
+                    .struct()
+                    .name("layer3")
+                    .field("layer3_string", Schema.STRING_SCHEMA)
+                    .field("layer3_int", Schema.INT32_SCHEMA)
+                    .field("layer3_long", Schema.INT64_SCHEMA)
+                    .build()
+                ).build()
+            )
+            .field("layer1_boolean", Schema.BOOLEAN_SCHEMA)
+            .field("layer1_int", Schema.INT32_SCHEMA)
+            .field("layer1_long", Schema.INT64_SCHEMA)
+            .field("layer1_float", Schema.FLOAT32_SCHEMA)
+            .field("layer1_double", Schema.FLOAT64_SCHEMA)
+            .field("layer1_string", Schema.STRING_SCHEMA)
+            .build();
+    }
+
+    protected Schema createValueSchemaNestedBase() {
+        return SchemaBuilder
+                .struct()
+                .name("layer2")
+                .field("layer2_string", Schema.STRING_SCHEMA)
+                .field("layer2_int", Schema.INT32_SCHEMA)
+                .field("layer2_long", Schema.INT64_SCHEMA)
+                .field("layer2_base",
+                    SchemaBuilder
+                        .struct()
+                        .name("layer3")
+                        .field("layer3_string", Schema.STRING_SCHEMA)
+                        .field("layer3_int", Schema.INT32_SCHEMA)
+                        .field("layer3_long", Schema.INT64_SCHEMA)
+                        .build()
+                ).build();
+    }
+
+    protected Schema createValueSchemaNestedsubBase() {
+        return SchemaBuilder
+                .struct()
+                .name("layer3")
+                .field("layer3_string", Schema.STRING_SCHEMA)
+                .field("layer3_int", Schema.INT32_SCHEMA)
+                .field("layer3_long", Schema.INT64_SCHEMA)
+                .build();
+    }
+
+    protected Struct createValueRecordNested(Schema schema, Schema baseSchema, Schema subBaseSchema) {
+        return (new Struct(schema)
+            .put("base",
+                new Struct(baseSchema)
+                    .put("layer2_string", "string")
+                    .put("layer2_int", Integer.valueOf(12))
+                    .put("layer2_long", 12L)
+                    .put("layer2_base",
+                        new Struct(subBaseSchema)
+                            .put("layer3_string", "string")
+                            .put("layer3_int", Integer.valueOf(12))
+                            .put("layer3_long", 12L)
+                    )
+            )
+            .put("layer1_boolean", true)
+            .put("layer1_int", Integer.valueOf(12))
+            .put("layer1_long", 12L)
+            .put("layer1_float", 12.2F)
+            .put("layer1_double", 12.2D)
+            .put("layer1_string", "string"));
+    }
+
+    protected Schema createExpectedValueSchemaNested() {
+        return SchemaBuilder
+            .struct()
+            .name("layer1")
+            .field("remote_addr", Schema.STRING_SCHEMA)
+            .field("http_x_forwarded_for", Schema.STRING_SCHEMA)
+            .field("time_iso8601", Schema.STRING_SCHEMA)
+            .field("uid_set", Schema.STRING_SCHEMA)
+            .field("uid_got", Schema.STRING_SCHEMA)
+            .field("request_method", Schema.STRING_SCHEMA)
+            .field("server_protocol", Schema.STRING_SCHEMA)
+            .field("status", Schema.STRING_SCHEMA)
+            .field("body_bytes_sent", Schema.STRING_SCHEMA)
+            .field("http_referer", Schema.STRING_SCHEMA)
+            .field("http_user_agent", Schema.STRING_SCHEMA)
+            .field("base",
+                SchemaBuilder
+                    .struct()
+                    .name("layer2")
+                    .field("layer2_string", Schema.STRING_SCHEMA)
+                    .field("layer2_int", Schema.INT32_SCHEMA)
+                    .field("layer2_long", Schema.INT64_SCHEMA)
+                    .field("layer2_base",
+                        SchemaBuilder
+                            .struct()
+                            .name("layer3")
+                            .field("layer3_string", Schema.STRING_SCHEMA)
+                            .field("layer3_int", Schema.INT32_SCHEMA)
+                            .field("layer3_long", Schema.INT64_SCHEMA).build()
+                    ).build()
+            )
+            .field("layer1_boolean", Schema.BOOLEAN_SCHEMA)
+            .field("layer1_int", Schema.INT32_SCHEMA)
+            .field("layer1_long", Schema.INT64_SCHEMA)
+            .field("layer1_float", Schema.FLOAT32_SCHEMA)
+            .field("layer1_double", Schema.FLOAT64_SCHEMA)
+            .field("layer1_string", Schema.STRING_SCHEMA)
+            .build();
+    }
+
+    protected Struct createExpectedValueRecordNested(Schema schema, Schema baseSchema, Schema subBaseSchema) {
+        return (new Struct(schema)
+            .put("remote_addr", "10.0.0.94")
+            .put("http_x_forwarded_for", "205.144.219.182")
+            .put("time_iso8601", "2017-03-06T21:22:20-05:00")
+            .put("uid_set", "3D02000A5C19BE58F00D3E68029E17A8")
+            .put("uid_got", "-")
+            .put("request_method", "GET")
+            .put("server_protocol", "HTTP/1.1")
+            .put("status", "200")
+            .put("body_bytes_sent", "35")
+            .put("http_referer", "-")
+            .put("http_user_agent", "Mozilla/5.0")
+            .put("base",
+                new Struct(baseSchema)
+                    .put("layer2_string", "string")
+                    .put("layer2_int", Integer.valueOf(12))
+                    .put("layer2_long", 12L)
+                    .put("layer2_base",
+                        new Struct(subBaseSchema)
+                            .put("layer3_string", "string")
+                            .put("layer3_int", Integer.valueOf(12))
+                            .put("layer3_long", 12L)
+                    )
+            )
+            .put("layer1_boolean", true)
+            .put("layer1_int", Integer.valueOf(12))
+            .put("layer1_long", 12L)
+            .put("layer1_float", 12.2F)
+            .put("layer1_double", 12.2D)
+            .put("layer1_string", "string"));
+    }
+
     /**
      * Return a list of new records starting at zero offset.
      *
      * @param size the number of records to return.
      * @return the list of records.
      */
-    protected List<SinkRecord> createRecords(int size) {
-        return createRecords(size, 0);
-    }
-
-    /**
-     * Return a list of new records starting at the given offset.
-     *
-     * @param size the number of records to return.
-     * @param startOffset the starting offset.
-     * @return the list of records.
-     */
-    protected List<SinkRecord> createRecords(int size, long startOffset) {
-        return createRecords(size, startOffset, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
-    }
-
     protected List<SinkRecord> createRecords(int size, long startOffset, Set<TopicPartition> partitions) {
+        Schema keySchema = createKeySchema();
+        Struct keyRecord = createKeyRecord(keySchema);
         Schema valueSchema = createValueSchema();
         Struct valueRecord = createValueRecord(valueSchema);
 
+        List<SinkRecord> sinkRecords = new ArrayList<>();
+        for (TopicPartition tp : partitions) {
+            for (long offset = startOffset; offset < startOffset + size; ++offset) {
+                sinkRecords.add(new SinkRecord(TOPIC, tp.partition(), keySchema, keyRecord, valueSchema, valueRecord, offset));
+            }
+        }
+        return sinkRecords;
+    }
+
+    /**
+     * Return a list of expected records starting at zero offset.
+     *
+     * @param size the number of records to return.
+     * @return the list of records.
+     */
+    protected List<SinkRecord> createExpectedRecords(int size, long startOffset, Set<TopicPartition> partitions) {
         Schema keySchema = createKeySchema();
         Struct keyRecord = createKeyRecord(keySchema);
+        Schema valueSchema = createExpectedValueSchema();
+        Struct valueRecord = createExpectedValueRecord(valueSchema);
 
         List<SinkRecord> sinkRecords = new ArrayList<>();
         for (TopicPartition tp : partitions) {
@@ -274,27 +498,82 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
      * @param size the number of records to return.
      * @return the list of records.
      */
-    protected List<SinkRecord> createExpectedRecords(int size) {
-        return createExpectedRecords(size, 0);
+    protected List<SinkRecord> createRecordsString(int size, long startOffset, Set<TopicPartition> partitions) {
+        Schema keySchema = createKeySchemaString();
+        String keyRecord = createKeyRecordString();
+        Schema valueSchema = createValueSchema();
+        Struct valueRecord = createValueRecord(valueSchema);
+
+        List<SinkRecord> sinkRecords = new ArrayList<>();
+        for (TopicPartition tp : partitions) {
+            for (long offset = startOffset; offset < startOffset + size; ++offset) {
+                sinkRecords.add(new SinkRecord(TOPIC, tp.partition(), keySchema, keyRecord, valueSchema, valueRecord, offset));
+            }
+        }
+        return sinkRecords;
     }
 
     /**
-     * Return a list of expected records starting at the given offset.
+     * Return a list of expected records starting at zero offset.
      *
      * @param size the number of records to return.
-     * @param startOffset the starting offset.
      * @return the list of records.
      */
-    protected List<SinkRecord> createExpectedRecords(int size, long startOffset) {
-        return createExpectedRecords(size, startOffset, Collections.singleton(new TopicPartition(TOPIC, PARTITION)));
+    protected List<SinkRecord> createExpectedRecordsString(int size, long startOffset, Set<TopicPartition> partitions) {
+        Schema keySchema = createKeySchemaString();
+        String keyRecord = createKeyRecordString();
+        Schema valueSchema = createExpectedValueSchemaString();
+        Struct valueRecord = createExpectedValueRecordString(valueSchema);
+
+        List<SinkRecord> sinkRecords = new ArrayList<>();
+        for (TopicPartition tp : partitions) {
+            for (long offset = startOffset; offset < startOffset + size; ++offset) {
+                sinkRecords.add(new SinkRecord(TOPIC, tp.partition(), keySchema, keyRecord, valueSchema, valueRecord, offset));
+            }
+        }
+        return sinkRecords;
     }
 
-    protected List<SinkRecord> createExpectedRecords(int size, long startOffset, Set<TopicPartition> partitions) {
-        Schema valueSchema = createExpectedValueSchema();
-        Struct valueRecord = createExpectedValueRecord(valueSchema);
-
+    /**
+     * Return a list of new records starting at zero offset.
+     *
+     * @param size the number of records to return.
+     * @return the list of records.
+     */
+    protected List<SinkRecord> createRecordsNested(int size, long startOffset, Set<TopicPartition> partitions) {
         Schema keySchema = createKeySchema();
         Struct keyRecord = createKeyRecord(keySchema);
+
+        Schema valueSchema = createValueSchemaNested();
+        Schema baseSchema = createValueSchemaNestedBase();
+        Schema subBaseSchema = createValueSchemaNestedsubBase();
+
+        Struct valueRecord = createValueRecordNested(valueSchema, baseSchema, subBaseSchema);
+
+        List<SinkRecord> sinkRecords = new ArrayList<>();
+        for (TopicPartition tp : partitions) {
+            for (long offset = startOffset; offset < startOffset + size; ++offset) {
+                sinkRecords.add(new SinkRecord(TOPIC, tp.partition(), keySchema, keyRecord, valueSchema, valueRecord, offset));
+            }
+        }
+        return sinkRecords;
+    }
+
+    /**
+     * Return a list of expected records starting at zero offset.
+     *
+     * @param size the number of records to return.
+     * @return the list of records.
+     */
+    protected List<SinkRecord> createExpectedRecordsNested(int size, long startOffset, Set<TopicPartition> partitions) {
+        Schema keySchema = createKeySchema();
+        Struct keyRecord = createKeyRecord(keySchema);
+
+        Schema valueSchema = createExpectedValueSchemaNested();
+        Schema baseSchema = createValueSchemaNestedBase();
+        Schema subBaseSchema = createValueSchemaNestedsubBase();
+
+        Struct valueRecord = createExpectedValueRecordNested(valueSchema, baseSchema, subBaseSchema);
 
         List<SinkRecord> sinkRecords = new ArrayList<>();
         for (TopicPartition tp : partitions) {

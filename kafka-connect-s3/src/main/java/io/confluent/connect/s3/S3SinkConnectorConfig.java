@@ -431,7 +431,9 @@ public class S3SinkConnectorConfig extends StorageSinkConnectorConfig {
     return FORMAT_BYTEARRAY_LINE_SEPARATOR_DEFAULT;
   }
 
-  public String getSinkData() { return getString(SINK_DATA_CONFIG); }
+  public String getSinkData() {
+    return getString(SINK_DATA_CONFIG);
+  }
 
   protected static String parseName(Map<String, String> props) {
     String nameProp = props.get("name");
