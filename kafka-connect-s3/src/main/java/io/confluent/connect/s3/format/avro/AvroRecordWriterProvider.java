@@ -104,7 +104,7 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
             // Combine avro key schema and avro value schema
             if (isSinkKey) {
               // Customized behaviour
-              outputSchema = getOutputSchema(keySchema, valueSchema);
+              outputSchema = mergeSchema(keySchema, valueSchema);
             } else {
               // Original behaviour
               outputSchema = avroValueSchema;
@@ -125,7 +125,7 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
 
         if (isSinkKey) {
           // Customized behaviour
-          outputValue = getOutputValue(key, value, avroKeySchema, avroValueSchema, outputSchema);
+          outputValue = mergeKeyValue(key, value, avroKeySchema, avroValueSchema, outputSchema);
         } else {
           // Original behaviour
           outputValue = value;
@@ -174,7 +174,7 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
    * @param valueSchema the connect schema of the value
    * @return output schema in avro format
    */
-  private org.apache.avro.Schema getOutputSchema(Schema keySchema, Schema valueSchema) {
+  private org.apache.avro.Schema mergeSchema(Schema keySchema, Schema valueSchema) {
     // Create the connect schema builder
     SchemaBuilder builder = SchemaBuilder
         .struct()
@@ -225,7 +225,7 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
    * @param outputAvroSchema the avro schema of the output
    * @return output value in GenericData.Record
    */
-  private GenericData.Record getOutputValue(
+  private GenericData.Record mergeKeyValue(
           Object key,
           Object value,
           org.apache.avro.Schema avroKeySchema,
