@@ -84,9 +84,8 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
       org.apache.avro.Schema avroValueSchema = null;
       org.apache.avro.Schema outputSchema = null;
 
-      // Set isCombineKeyValue based on config
-      Boolean isCombineKeyValue =
-              conf.getSinkData().contains("key") && conf.getSinkData().contains("value");
+      // Set isSinkKey based on config
+      boolean isSinkKey = conf.getSinkKey();
 
       // S3 output stream
       S3OutputStream s3out;
@@ -104,7 +103,7 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
             avroValueSchema = avroData.fromConnectSchema(valueSchema);//convert to avro value schema
 
             // Combine avro key schema and avro value schema
-            if (isCombineKeyValue) {
+            if (isSinkKey) {
               outputSchema = getOutputSchema(keySchema, valueSchema);//customized behaviour
             } else {
               outputSchema = avroValueSchema;//original behaviour
@@ -123,7 +122,7 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
         Object value = avroData.fromConnectData(valueSchema, record.value());
         Object outputValue;
 
-        if (isCombineKeyValue) {
+        if (isSinkKey) {
           outputValue = getOutputValue(key, value, avroKeySchema, avroValueSchema, outputSchema);
         } else {
           outputValue = value;

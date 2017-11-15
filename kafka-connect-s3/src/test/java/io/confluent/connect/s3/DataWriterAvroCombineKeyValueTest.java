@@ -79,7 +79,7 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
     private final String extension = ".avro";
     protected S3Storage storage;
     protected AmazonS3 s3;
-    protected static final String SINK_DATA = "key,value";
+    protected static final String SINK_KEY = "true";
     AvroFormat format;
     Partitioner<FieldSchema> partitioner;
     S3SinkTask task;
@@ -88,7 +88,7 @@ public class DataWriterAvroCombineKeyValueTest extends TestWithMockedS3 {
     @Override
     protected Map<String, String> createProps() {
         Map<String, String> props = super.createProps();
-        props.put(S3SinkConnectorConfig.SINK_DATA_CONFIG, SINK_DATA);
+        props.put(S3SinkConnectorConfig.SINK_KEY_CONFIG, SINK_KEY);
         props.putAll(localProps);
         return props;
     }

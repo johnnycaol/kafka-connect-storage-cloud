@@ -99,8 +99,8 @@ public class S3SinkConnectorConfig extends StorageSinkConnectorConfig {
   public static final String S3_PROXY_PASS_CONFIG = "s3.proxy.password";
   public static final Password S3_PROXY_PASS_DEFAULT = new Password(null);
 
-  public static final String SINK_DATA_CONFIG = "value";//key,value
-  public static final String SINK_DATA_DEFAULT = "value";
+  public static final String SINK_KEY_CONFIG = "s3.sink.key";
+  public static final boolean SINK_KEY_DEFAULT = false;
 
   private final String name;
 
@@ -337,15 +337,15 @@ public class S3SinkConnectorConfig extends StorageSinkConnectorConfig {
       );
 
       configDef.define(
-          SINK_DATA_CONFIG,
-          Type.STRING,
-          SINK_DATA_DEFAULT,
+          SINK_KEY_CONFIG,
+          Type.BOOLEAN,
+          SINK_KEY_DEFAULT,
           Importance.HIGH,
-          "The key or value to save to S3.",
+          "Save both Key and Value to S3.",
           group,
           ++orderInGroup,
           Width.LONG,
-          "Sink Data"
+          "Sink Key"
       );
     }
     return configDef;
@@ -431,8 +431,8 @@ public class S3SinkConnectorConfig extends StorageSinkConnectorConfig {
     return FORMAT_BYTEARRAY_LINE_SEPARATOR_DEFAULT;
   }
 
-  public String getSinkData() {
-    return getString(SINK_DATA_CONFIG);
+  public boolean getSinkKey() {
+    return getBoolean(SINK_KEY_CONFIG);
   }
 
   protected static String parseName(Map<String, String> props) {
