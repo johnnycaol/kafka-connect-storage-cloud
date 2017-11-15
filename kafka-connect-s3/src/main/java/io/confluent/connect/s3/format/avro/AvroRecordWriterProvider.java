@@ -29,6 +29,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import io.confluent.connect.avro.AvroData;
 import io.confluent.connect.s3.S3SinkConnectorConfig;
@@ -44,6 +47,18 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
   private static final String EXTENSION = ".avro";
   private final S3Storage storage;
   private final AvroData avroData;
+
+  // Supported schema types if combine key and value
+  private final List<Schema.Type> supportedSchemaTypes = Arrays.asList(
+      Schema.Type.INT8,
+      Schema.Type.INT16,
+      Schema.Type.INT32,
+      Schema.Type.INT64,
+      Schema.Type.FLOAT32,
+      Schema.Type.FLOAT64,
+      Schema.Type.BOOLEAN,
+      Schema.Type.STRING
+  );
 
   AvroRecordWriterProvider(S3Storage storage, AvroData avroData) {
     this.storage = storage;
@@ -88,7 +103,6 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
             avroKeySchema = avroData.fromConnectSchema(keySchema);//convert to avro key schema
             avroValueSchema = avroData.fromConnectSchema(valueSchema);//convert to avro value schema
 
-            //TODO: deal with the issue that left is String
             // Combine avro key schema and avro value schema
             if (isCombineKeyValue) {
               outputSchema = getOutputSchema(keySchema, valueSchema);//customized behaviour
@@ -153,44 +167,61 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
 
   /**
    * Get output schema in avro format
+   *
    * @param keySchema the connect schema of the key
    * @param valueSchema the connect schema of the value
    * @return output schema in avro format
    */
   private org.apache.avro.Schema getOutputSchema(Schema keySchema, Schema valueSchema) {
+    // Create the connect schema builder
     SchemaBuilder builder = SchemaBuilder
         .struct()
         .name(valueSchema.name())
         .doc(valueSchema.doc())
         .version(valueSchema.version());
 
+    // Process the key schema
     if (keySchema.type() == Schema.Type.STRUCT) {
       for (Field field: keySchema.fields()) {
         builder.field(field.name(), field.schema());
       }
-    } else {
+    } else if (supportedSchemaTypes.contains(keySchema.type())) {
       builder.field("key", keySchema);
+    } else {
+      throw new ConnectException(
+          "Key type: " + keySchema.type().toString() + "not supported!"
+      );
     }
 
+    // Process the value schema
     if (valueSchema.type() == Schema.Type.STRUCT) {
       for (Field field: valueSchema.fields()) {
         builder.field(field.name(), field.schema());
       }
-    } else {
+    } else if (supportedSchemaTypes.contains(valueSchema.type())) {
       builder.field("value", valueSchema);
+    } else {
+      throw new ConnectException(
+          "Value type: " + valueSchema.type().toString() + "not supported!"
+      );
     }
 
-    return avroData.fromConnectSchema(builder.build());
+    // Create the connect output schema
+    Schema schema = builder.build();
+
+    // Return the output schema in avro format
+    return avroData.fromConnectSchema(schema);
   }
 
   /**
-   * Get output value for the S3 connector
+   * Get output value in GenericData.Record
+   *
    * @param key the key object
    * @param value the value object
    * @param avroKeySchema the avro schema of the key
    * @param avroValueSchema the avro schema of the value
    * @param outputAvroSchema the avro schema of the output
-   * @return output value
+   * @return output value in GenericData.Record
    */
   private GenericData.Record getOutputValue(
           Object key,
@@ -201,7 +232,7 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
     // Initialize outputValue
     GenericData.Record outputValue = new GenericData.Record(outputAvroSchema);
 
-    // Process the key
+    // Process the key object
     if (key instanceof NonRecordContainer) {
       outputValue.put("key", ((NonRecordContainer) key).getValue());
     } else if (key instanceof GenericData.Record) {
@@ -215,7 +246,7 @@ public class AvroRecordWriterProvider implements RecordWriterProvider<S3SinkConn
       );
     }
 
-    // Process the value
+    // Process the value object
     if (value instanceof NonRecordContainer) {
       outputValue.put("value", ((NonRecordContainer) value).getValue());
     } else if (value instanceof GenericData.Record) {
